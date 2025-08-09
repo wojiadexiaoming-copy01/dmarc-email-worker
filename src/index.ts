@@ -21,85 +21,85 @@ import {
 
 export default {
   async email(message: EmailMessage, env: Env, ctx: ExecutionContext): Promise<void> {
-    console.log('🚀 ===== DMARC Email Worker Started =====')
-    console.log('📧 Received email message at:', new Date().toISOString())
-    console.log('📨 Message from:', message.from)
-    console.log('📬 Message to:', message.to)
-    console.log('📝 Message subject:', message.headers.get('subject') || 'No subject')
-    console.log('📏 Message size:', message.raw.length, 'bytes')
+    console.log('🚀 ===== 邮件处理器启动 =====')
+    console.log('📧 收到邮件时间:', new Date().toISOString())
+    console.log('📨 发件人:', message.from)
+    console.log('📬 收件人:', message.to)
+    console.log('📝 邮件主题:', message.headers.get('subject') || '无主题')
+    console.log('📏 邮件大小:', message.raw.length, '字节')
 
     try {
       await handleEmail(message, env, ctx)
-      console.log('✅ ===== DMARC Email Worker Completed Successfully =====')
+      console.log('✅ ===== 邮件处理完成 =====')
     } catch (error) {
-      console.error('❌ ===== DMARC Email Worker Failed =====')
-      console.error('💥 Error details:', error)
+      console.error('❌ ===== 邮件处理失败 =====')
+      console.error('💥 错误详情:', error)
       throw error
     }
   },
 }
 
 async function handleEmail(message: EmailMessage, env: Env, ctx: ExecutionContext): Promise<void> {
-  console.log('🔧 ===== Starting Email Processing =====')
+  console.log('🔧 ===== 开始处理邮件 =====')
 
   const parser = new PostalMime.default()
-  console.log('📦 Initialized PostalMime parser')
+  console.log('📦 初始化邮件解析器')
 
   try {
     // 解析邮件内容
-    console.log('📖 Step 1: Parsing email content...')
+    console.log('📖 步骤1: 解析邮件内容...')
     const rawEmail = new Response(message.raw)
     const email = await parser.parse(await rawEmail.arrayBuffer())
-    console.log('✅ Email parsed successfully')
-    console.log('📧 Email details:')
-    console.log('  - From:', email.from?.address || 'Unknown')
-    console.log('  - Subject:', email.subject || 'No subject')
-    console.log('  - Date:', email.date || 'No date')
-    console.log('  - Attachments count:', email.attachments?.length || 0)
+    console.log('✅ 邮件解析成功')
+    console.log('📧 邮件详情:')
+    console.log('  - 发件人:', email.from?.address || '未知')
+    console.log('  - 主题:', email.subject || '无主题')
+    console.log('  - 日期:', email.date || '无日期')
+    console.log('  - 附件数量:', email.attachments?.length || 0)
 
     // 处理附件（如果有的话）
-    console.log('📎 Step 2: Processing attachments...')
+    console.log('📎 步骤2: 处理附件...')
     let attachment = null
     let reportRows: DmarcRecordRow[] = []
-    
+
     if (email.attachments && email.attachments.length > 0) {
-      console.log('📄 Found', email.attachments.length, 'attachment(s)')
+      console.log('📄 发现', email.attachments.length, '个附件')
       attachment = email.attachments[0]
-      console.log('📄 Attachment details:')
-      console.log('  - Filename:', attachment.filename)
-      console.log('  - MIME type:', attachment.mimeType)
-      console.log('  - Size:', typeof attachment.content === 'string' ? attachment.content.length : attachment.content.byteLength, 'bytes')
-      console.log('  - Disposition:', attachment.disposition)
+      console.log('📄 附件详情:')
+      console.log('  - 文件名:', attachment.filename)
+      console.log('  - MIME类型:', attachment.mimeType)
+      console.log('  - 大小:', typeof attachment.content === 'string' ? attachment.content.length : attachment.content.byteLength, '字节')
+      console.log('  - 处理方式:', attachment.disposition)
 
       // 尝试解析XML获取DMARC报告数据（如果是DMARC报告的话）
-      console.log('🔍 Step 3: Attempting to parse attachment as DMARC XML data...')
+      console.log('🔍 步骤3: 尝试解析附件为DMARC报告...')
       try {
         const reportJSON = await getDMARCReportXML(attachment)
-        console.log('✅ XML parsed successfully as DMARC report')
-        console.log('📊 Report metadata:')
-        console.log('  - Org name:', reportJSON?.feedback?.report_metadata?.org_name || 'Unknown')
-        console.log('  - Report ID:', reportJSON?.feedback?.report_metadata?.report_id || 'Unknown')
-        console.log('  - Domain:', reportJSON?.feedback?.policy_published?.domain || 'Unknown')
+        console.log('✅ 成功解析为DMARC报告')
+        console.log('📊 报告元数据:')
+        console.log('  - 组织名称:', reportJSON?.feedback?.report_metadata?.org_name || '未知')
+        console.log('  - 报告ID:', reportJSON?.feedback?.report_metadata?.report_id || '未知')
+        console.log('  - 域名:', reportJSON?.feedback?.policy_published?.domain || '未知')
 
         reportRows = getReportRows(reportJSON)
-        console.log('📈 Extracted', reportRows.length, 'DMARC records from report')
+        console.log('📈 从报告中提取了', reportRows.length, '条DMARC记录')
       } catch (parseError) {
-        console.log('ℹ️ Attachment is not a valid DMARC report, treating as regular email attachment')
-        console.log('📋 Parse error:', parseError.message)
+        console.log('ℹ️ 附件不是有效的DMARC报告，作为普通邮件附件处理')
+        console.log('📋 解析错误:', parseError.message)
         // 继续处理，只是没有DMARC数据
       }
     } else {
-      console.log('ℹ️ No attachments found, processing as regular email')
+      console.log('ℹ️ 未发现附件，作为普通邮件处理')
     }
 
     // 调用UniCloud云函数处理数据（无论是否有附件都调用）
-    console.log('☁️ Step 4: Calling UniCloud function to process email data...')
+    console.log('☁️ 步骤4: 调用云函数处理邮件数据...')
     await callUniCloudFunction(email, attachment, reportRows)
 
-    console.log('🎉 Successfully processed DMARC report with', reportRows.length, 'records')
+    console.log('🎉 邮件处理成功，共处理', reportRows.length, '条记录')
   } catch (error) {
-    console.error('💥 Error in handleEmail:', error)
-    console.error('📋 Error details:', {
+    console.error('💥 邮件处理出错:', error)
+    console.error('📋 错误详情:', {
       message: error.message,
       stack: error.stack,
       name: error.name
@@ -109,52 +109,52 @@ async function handleEmail(message: EmailMessage, env: Env, ctx: ExecutionContex
 }
 
 async function getDMARCReportXML(attachment: Attachment) {
-  console.log('🔍 ===== Starting XML Parsing =====')
-  console.log('📄 Attachment MIME type:', attachment.mimeType)
+  console.log('🔍 ===== 开始解析XML =====')
+  console.log('📄 附件MIME类型:', attachment.mimeType)
 
   let xml
   const xmlParser = new XMLParser()
   const extension = mimeDb[attachment.mimeType]?.extensions?.[0] || ''
-  console.log('📝 Detected file extension:', extension || 'unknown')
+  console.log('📝 检测到文件扩展名:', extension || '未知')
 
   try {
     switch (extension) {
       case 'gz':
-        console.log('🗜️ Processing GZ compressed file...')
+        console.log('🗜️ 处理GZ压缩文件...')
         xml = pako.inflate(new TextEncoder().encode(attachment.content as string), { to: 'string' })
-        console.log('✅ GZ file decompressed successfully')
-        console.log('📏 Decompressed XML size:', xml.length, 'characters')
+        console.log('✅ GZ文件解压成功')
+        console.log('📏 解压后XML大小:', xml.length, '字符')
         break
 
       case 'zip':
-        console.log('📦 Processing ZIP compressed file...')
+        console.log('📦 处理ZIP压缩文件...')
         xml = await getXMLFromZip(attachment.content)
-        console.log('✅ ZIP file extracted successfully')
-        console.log('📏 Extracted XML size:', xml.length, 'characters')
+        console.log('✅ ZIP文件提取成功')
+        console.log('📏 提取的XML大小:', xml.length, '字符')
         break
 
       case 'xml':
-        console.log('📄 Processing plain XML file...')
+        console.log('📄 处理纯XML文件...')
         xml = await new Response(attachment.content).text()
-        console.log('✅ XML file read successfully')
-        console.log('📏 XML size:', xml.length, 'characters')
+        console.log('✅ XML文件读取成功')
+        console.log('📏 XML大小:', xml.length, '字符')
         break
 
       default:
-        console.error('❌ Unknown file extension:', extension)
-        console.error('📋 MIME type:', attachment.mimeType)
-        throw new Error(`unknown extension: ${extension}`)
+        console.error('❌ 未知文件扩展名:', extension)
+        console.error('📋 MIME类型:', attachment.mimeType)
+        throw new Error(`未知扩展名: ${extension}`)
     }
 
-    console.log('🔄 Parsing XML content...')
+    console.log('🔄 解析XML内容...')
     const parsedXML = await xmlParser.parse(xml)
-    console.log('✅ XML parsed successfully')
-    console.log('📊 XML structure preview:', JSON.stringify(parsedXML, null, 2).substring(0, 500) + '...')
+    console.log('✅ XML解析成功')
+    console.log('📊 XML结构预览:', JSON.stringify(parsedXML, null, 2).substring(0, 500) + '...')
 
     return parsedXML
   } catch (error) {
-    console.error('💥 Error in getDMARCReportXML:', error)
-    console.error('📋 Error details:', {
+    console.error('💥 XML解析出错:', error)
+    console.error('📋 错误详情:', {
       message: error.message,
       extension: extension,
       mimeType: attachment.mimeType,
@@ -166,79 +166,79 @@ async function getDMARCReportXML(attachment: Attachment) {
 }
 
 async function getXMLFromZip(content: string | ArrayBuffer | Blob | unzipit.TypedArray | unzipit.Reader) {
-  console.log('📦 ===== Extracting ZIP File =====')
+  console.log('📦 ===== 提取ZIP文件 =====')
 
   try {
-    console.log('🔄 Unzipping content...')
+    console.log('🔄 解压内容...')
     const { entries } = await unzipit.unzipRaw(content)
-    console.log('📁 ZIP entries found:', entries.length)
+    console.log('📁 发现ZIP条目:', entries.length, '个')
 
     if (entries.length === 0) {
-      console.error('❌ No entries found in ZIP file')
-      throw new Error('no entries in zip')
+      console.error('❌ ZIP文件中未发现条目')
+      throw new Error('ZIP文件为空')
     }
 
     // 列出所有条目
     entries.forEach((entry, index) => {
-      console.log(`📄 Entry ${index + 1}:`, entry.name, `(${entry.size} bytes)`)
+      console.log(`📄 条目 ${index + 1}:`, entry.name, `(${entry.size} 字节)`)
     })
 
-    console.log('📖 Reading first entry content...')
+    console.log('📖 读取第一个条目内容...')
     const xmlContent = await entries[0].text()
-    console.log('✅ ZIP entry extracted successfully')
-    console.log('📏 Extracted content size:', xmlContent.length, 'characters')
+    console.log('✅ ZIP条目提取成功')
+    console.log('📏 提取内容大小:', xmlContent.length, '字符')
 
     return xmlContent
   } catch (error) {
-    console.error('💥 Error in getXMLFromZip:', error)
-    console.error('📋 Error details:', {
+    console.error('💥 ZIP提取出错:', error)
+    console.error('📋 错误详情:', {
       message: error.message,
       contentType: typeof content,
-      contentSize: content instanceof ArrayBuffer ? content.byteLength : 'unknown'
+      contentSize: content instanceof ArrayBuffer ? content.byteLength : '未知'
     })
     throw error
   }
 }
 
 function getReportRows(report: any): DmarcRecordRow[] {
-  console.log('📊 ===== Processing DMARC Report Data =====')
+  console.log('📊 ===== 处理DMARC报告数据 =====')
 
   try {
-    console.log('🔍 Validating report structure...')
+    console.log('🔍 验证报告结构...')
     const reportMetadata = report.feedback?.report_metadata
     const policyPublished = report.feedback?.policy_published
     const records = Array.isArray(report.feedback?.record) ? report.feedback.record : [report.feedback?.record]
 
-    console.log('📋 Report validation:')
-    console.log('  - Has feedback:', !!report.feedback)
-    console.log('  - Has metadata:', !!reportMetadata)
-    console.log('  - Has policy:', !!policyPublished)
-    console.log('  - Has records:', !!records && records.length > 0)
+    console.log('📋 报告验证:')
+    console.log('  - 有反馈数据:', !!report.feedback)
+    console.log('  - 有元数据:', !!reportMetadata)
+    console.log('  - 有策略:', !!policyPublished)
+    console.log('  - 有记录:', !!records && records.length > 0)
 
     if (!report.feedback || !reportMetadata || !policyPublished || !records) {
-      console.error('❌ Invalid XML structure')
-      console.error('📋 Missing components:', {
+      console.error('❌ 无效的XML结构')
+      console.error('📋 缺少组件:', {
         feedback: !report.feedback,
         metadata: !reportMetadata,
         policy: !policyPublished,
         records: !records
       })
-      throw new Error('invalid xml')
+      throw new Error('无效的XML')
     }
 
-    console.log('📊 Report metadata:')
-    console.log('  - Report ID:', reportMetadata.report_id)
-    console.log('  - Organization:', reportMetadata.org_name)
-    console.log('  - Date range:', reportMetadata.date_range?.begin, 'to', reportMetadata.date_range?.end)
+    console.log('📊 报告元数据:')
+    console.log('  - 报告ID:', reportMetadata.report_id)
+    console.log('  - 组织:', reportMetadata.org_name)
+    console.log('  - 日期范围:', reportMetadata.date_range?.begin, '到', reportMetadata.date_range?.end)
 
-    console.log('🛡️ Policy published:')
-    console.log('  - Domain:', policyPublished.domain)
-    console.log('  - Policy:', policyPublished.p)
-    console.log('  - Percentage:', policyPublished.pct)
-    console.log('  - DKIM alignment:', policyPublished.adkim)
-    console.log('  - SPF alignment:', policyPublished.aspf)
+    console.log('🛡️ 发布策略:')
+    console.log('  - 域名:', policyPublished.domain)
+    console.log('  - 策略:', policyPublished.p)
+    console.log('  - 百分比:', policyPublished.pct)
+    console.log('  - DKIM对齐:', policyPublished.adkim)
+    console.log('  - SPF对齐:', policyPublished.aspf)
 
-    console.log('📈 Processing', records.length, 'record(s)...')
+    console.log('📈 处理', records.length, '条记录...')
     const listEvents: DmarcRecordRow[] = []
 
     for (let index = 0; index < records.length; index++) {
@@ -300,7 +300,7 @@ async function callUniCloudFunction(
   attachment: Attachment | null,
   reportRows: DmarcRecordRow[]
 ): Promise<void> {
-  console.log('☁️ ===== Calling UniCloud Function =====')
+  console.log('☁️ ===== 调用云函数 =====')
   console.log('� Retcords to process:', reportRows.length)
   console.log('📄 Has attachment:', !!attachment)
   if (attachment) {
@@ -309,7 +309,7 @@ async function callUniCloudFunction(
   }
 
   const cloudFunctionUrl = 'https://env-00jxt0xsffn5.dev-hz.cloudbasefunction.cn/POST_cloudflare_edukg_email'
-  
+
   try {
     // 准备发送给云函数的数据
     const payload = {
@@ -321,7 +321,7 @@ async function callUniCloudFunction(
         date: email.date || new Date().toISOString(),
         messageId: email.messageId || 'unknown'
       },
-      
+
       // 附件信息（如果有的话）
       attachment: attachment ? {
         filename: attachment.filename,
@@ -329,13 +329,13 @@ async function callUniCloudFunction(
         content: attachment.content, // 原始内容，云函数会处理
         size: typeof attachment.content === 'string' ? attachment.content.length : attachment.content.byteLength
       } : null,
-      
+
       // 解析后的DMARC数据
       dmarcRecords: reportRows,
-      
+
       // 处理时间戳
       processedAt: new Date().toISOString(),
-      
+
       // Worker信息
       workerInfo: {
         version: '1.0.0',
@@ -372,7 +372,7 @@ async function callUniCloudFunction(
       const result = await response.json()
       console.log('✅ UniCloud function executed successfully!')
       console.log('📄 Response data:', JSON.stringify(result, null, 2))
-      
+
       // 记录处理结果
       if (result.success) {
         console.log('🎉 Data processing completed successfully!')
