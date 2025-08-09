@@ -57,34 +57,43 @@ async function handleEmail(message: EmailMessage, env: Env, ctx: ExecutionContex
     console.log('  - Date:', email.date || 'No date')
     console.log('  - Attachments count:', email.attachments?.length || 0)
 
-    // 获取附件
+    // 处理附件（如果有的话）
     console.log('📎 Step 2: Processing attachments...')
-    if (email.attachments === null || email.attachments.length === 0) {
-      console.error('❌ No attachments found in email')
-      throw new Error('no attachments')
+    let attachment = null
+    let reportRows: DmarcRecordRow[] = []
+    
+    if (email.attachments && email.attachments.length > 0) {
+      console.log('📄 Found', email.attachments.length, 'attachment(s)')
+      attachment = email.attachments[0]
+      console.log('📄 Attachment details:')
+      console.log('  - Filename:', attachment.filename)
+      console.log('  - MIME type:', attachment.mimeType)
+      console.log('  - Size:', typeof attachment.content === 'string' ? attachment.content.length : attachment.content.byteLength, 'bytes')
+      console.log('  - Disposition:', attachment.disposition)
+
+      // 尝试解析XML获取DMARC报告数据（如果是DMARC报告的话）
+      console.log('🔍 Step 3: Attempting to parse attachment as DMARC XML data...')
+      try {
+        const reportJSON = await getDMARCReportXML(attachment)
+        console.log('✅ XML parsed successfully as DMARC report')
+        console.log('📊 Report metadata:')
+        console.log('  - Org name:', reportJSON?.feedback?.report_metadata?.org_name || 'Unknown')
+        console.log('  - Report ID:', reportJSON?.feedback?.report_metadata?.report_id || 'Unknown')
+        console.log('  - Domain:', reportJSON?.feedback?.policy_published?.domain || 'Unknown')
+
+        reportRows = getReportRows(reportJSON)
+        console.log('📈 Extracted', reportRows.length, 'DMARC records from report')
+      } catch (parseError) {
+        console.log('ℹ️ Attachment is not a valid DMARC report, treating as regular email attachment')
+        console.log('📋 Parse error:', parseError.message)
+        // 继续处理，只是没有DMARC数据
+      }
+    } else {
+      console.log('ℹ️ No attachments found, processing as regular email')
     }
 
-    const attachment = email.attachments[0]
-    console.log('📄 Attachment details:')
-    console.log('  - Filename:', attachment.filename)
-    console.log('  - MIME type:', attachment.mimeType)
-    console.log('  - Size:', typeof attachment.content === 'string' ? attachment.content.length : attachment.content.byteLength, 'bytes')
-    console.log('  - Disposition:', attachment.disposition)
-
-    // 解析XML获取DMARC报告数据
-    console.log('🔍 Step 3: Parsing DMARC XML data...')
-    const reportJSON = await getDMARCReportXML(attachment)
-    console.log('✅ XML parsed successfully')
-    console.log('📊 Report metadata:')
-    console.log('  - Org name:', reportJSON?.feedback?.report_metadata?.org_name || 'Unknown')
-    console.log('  - Report ID:', reportJSON?.feedback?.report_metadata?.report_id || 'Unknown')
-    console.log('  - Domain:', reportJSON?.feedback?.policy_published?.domain || 'Unknown')
-
-    const reportRows = getReportRows(reportJSON)
-    console.log('📈 Extracted', reportRows.length, 'DMARC records from report')
-
-    // 调用UniCloud云函数处理数据
-    console.log('☁️ Step 4: Calling UniCloud function to process data...')
+    // 调用UniCloud云函数处理数据（无论是否有附件都调用）
+    console.log('☁️ Step 4: Calling UniCloud function to process email data...')
     await callUniCloudFunction(email, attachment, reportRows)
 
     console.log('🎉 Successfully processed DMARC report with', reportRows.length, 'records')
@@ -288,13 +297,16 @@ function getReportRows(report: any): DmarcRecordRow[] {
 // 调用UniCloud云函数处理邮件数据
 async function callUniCloudFunction(
   email: any,
-  attachment: Attachment,
+  attachment: Attachment | null,
   reportRows: DmarcRecordRow[]
 ): Promise<void> {
   console.log('☁️ ===== Calling UniCloud Function =====')
   console.log('� Retcords to process:', reportRows.length)
-  console.log('📄 Attachment filename:', attachment.filename)
-  console.log('📏 Attachment size:', typeof attachment.content === 'string' ? attachment.content.length : attachment.content.byteLength, 'bytes')
+  console.log('📄 Has attachment:', !!attachment)
+  if (attachment) {
+    console.log('📄 Attachment filename:', attachment.filename)
+    console.log('📏 Attachment size:', typeof attachment.content === 'string' ? attachment.content.length : attachment.content.byteLength, 'bytes')
+  }
 
   const cloudFunctionUrl = 'https://env-00jxt0xsffn5.dev-hz.cloudbasefunction.cn/POST_cloudflare_edukg_email'
   
@@ -310,13 +322,13 @@ async function callUniCloudFunction(
         messageId: email.messageId || 'unknown'
       },
       
-      // 附件信息
-      attachment: {
+      // 附件信息（如果有的话）
+      attachment: attachment ? {
         filename: attachment.filename,
         mimeType: attachment.mimeType,
         content: attachment.content, // 原始内容，云函数会处理
         size: typeof attachment.content === 'string' ? attachment.content.length : attachment.content.byteLength
-      },
+      } : null,
       
       // 解析后的DMARC数据
       dmarcRecords: reportRows,
@@ -334,7 +346,10 @@ async function callUniCloudFunction(
     console.log('📦 Payload summary:')
     console.log('  - Email from:', payload.emailInfo.from)
     console.log('  - Email subject:', payload.emailInfo.subject)
-    console.log('  - Attachment filename:', payload.attachment.filename)
+    console.log('  - Has attachment:', !!payload.attachment)
+    if (payload.attachment) {
+      console.log('  - Attachment filename:', payload.attachment.filename)
+    }
     console.log('  - DMARC records count:', payload.dmarcRecords.length)
     console.log('  - Payload size:', JSON.stringify(payload).length, 'characters')
 
