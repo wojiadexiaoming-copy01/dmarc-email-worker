@@ -1,5 +1,5 @@
 export interface Env {
-  // 移除Cloudflare特定的绑定，使用硬编码的CloudBase配置
+  // 不需要任何环境变量，直接调用UniCloud云函数
 }
 
 export type Header = Record<string, string>
@@ -62,12 +62,38 @@ export type DmarcRecordRow = {
   recordIdentifiersHeaderFrom: string
 }
 
-// uniCloud数据库记录类型
-export type DmarcDatabaseRecord = DmarcRecordRow & {
-  _id?: string
-  createTime: number
-  updateTime: number
-  attachmentUrl?: string // 云存储中的文件URL
+// UniCloud云函数请求数据类型
+export type UniCloudFunctionPayload = {
+  emailInfo: {
+    from: string
+    to: string[]
+    subject: string
+    date: string
+    messageId: string
+  }
+  attachment: {
+    filename: string
+    mimeType: string
+    content: string | ArrayBuffer
+    size: number
+  }
+  dmarcRecords: DmarcRecordRow[]
+  processedAt: string
+  workerInfo: {
+    version: string
+    source: string
+  }
+}
+
+// UniCloud云函数响应数据类型
+export type UniCloudFunctionResponse = {
+  success: boolean
+  message?: string
+  error?: string
+  uploadedFileUrl?: string
+  insertedRecords?: number
+  processingTime?: number
+  data?: any
 }
 
 export enum AlignmentType {

@@ -17,7 +17,7 @@ import {
   PolicyOverrideType,
 } from './types'
 
-import { UniCloudClient } from './unicloud-client'
+// 移除UniCloudClient导入，改为直接HTTP调用
 
 export default {
   async email(message: EmailMessage, env: Env, ctx: ExecutionContext): Promise<void> {
@@ -43,8 +43,7 @@ async function handleEmail(message: EmailMessage, env: Env, ctx: ExecutionContex
   console.log('🔧 ===== Starting Email Processing =====')
 
   const parser = new PostalMime.default()
-  const uniCloudClient = new UniCloudClient(env)
-  console.log('📦 Initialized PostalMime parser and CloudBase client')
+  console.log('📦 Initialized PostalMime parser')
 
   try {
     // 解析邮件内容
@@ -72,24 +71,8 @@ async function handleEmail(message: EmailMessage, env: Env, ctx: ExecutionContex
     console.log('  - Size:', typeof attachment.content === 'string' ? attachment.content.length : attachment.content.byteLength, 'bytes')
     console.log('  - Disposition:', attachment.disposition)
 
-    // 上传附件到CloudBase云存储
-    console.log('☁️ Step 3: Uploading file to CloudBase storage...')
-    let attachmentUrl: string | undefined
-    try {
-      attachmentUrl = await uniCloudClient.uploadFile(attachment.filename, attachment.content)
-      console.log('✅ File uploaded successfully to CloudBase!')
-      console.log('🔗 File URL:', attachmentUrl)
-    } catch (error) {
-      console.error('❌ Failed to upload file to CloudBase:', error)
-      console.error('📋 Upload error details:', {
-        message: error.message,
-        stack: error.stack
-      })
-      // 继续处理，即使上传失败
-    }
-
     // 解析XML获取DMARC报告数据
-    console.log('🔍 Step 4: Parsing DMARC XML data...')
+    console.log('🔍 Step 3: Parsing DMARC XML data...')
     const reportJSON = await getDMARCReportXML(attachment)
     console.log('✅ XML parsed successfully')
     console.log('📊 Report metadata:')
@@ -100,9 +83,9 @@ async function handleEmail(message: EmailMessage, env: Env, ctx: ExecutionContex
     const reportRows = getReportRows(reportJSON)
     console.log('📈 Extracted', reportRows.length, 'DMARC records from report')
 
-    // 将数据保存到CloudBase数据库
-    console.log('💾 Step 5: Saving data to CloudBase database...')
-    await saveToUniCloudDatabase(uniCloudClient, reportRows, attachmentUrl)
+    // 调用UniCloud云函数处理数据
+    console.log('☁️ Step 4: Calling UniCloud function to process data...')
+    await callUniCloudFunction(email, attachment, reportRows)
 
     console.log('🎉 Successfully processed DMARC report with', reportRows.length, 'records')
   } catch (error) {
@@ -302,96 +285,108 @@ function getReportRows(report: any): DmarcRecordRow[] {
   }
 }
 
-async function saveToUniCloudDatabase(
-  uniCloudClient: UniCloudClient,
-  reportRows: DmarcRecordRow[],
-  attachmentUrl?: string
+// 调用UniCloud云函数处理邮件数据
+async function callUniCloudFunction(
+  email: any,
+  attachment: Attachment,
+  reportRows: DmarcRecordRow[]
 ): Promise<void> {
-  console.log('💾 ===== Saving Data to CloudBase Database =====')
-  console.log('📊 Records to save:', reportRows.length)
-  console.log('🔗 Attachment URL:', attachmentUrl || 'None')
+  console.log('☁️ ===== Calling UniCloud Function =====')
+  console.log('� Retcords to process:', reportRows.length)
+  console.log('📄 Attachment filename:', attachment.filename)
+  console.log('📏 Attachment size:', typeof attachment.content === 'string' ? attachment.content.length : attachment.content.byteLength, 'bytes')
 
+  const cloudFunctionUrl = 'https://env-00jxt0xsffn5.dev-hz.cloudbasefunction.cn/POST_cloudflare_edukg_email'
+  
   try {
-    console.log('🔄 Converting records to database format...')
-    const currentTime = Date.now()
-    const databaseRecords: DmarcDatabaseRecord[] = reportRows.map((row, index) => {
-      console.log(`📝 Converting record ${index + 1}/${reportRows.length}:`, {
-        reportId: row.reportMetadataReportId,
-        domain: row.policyPublishedDomain,
-        sourceIP: row.recordRowSourceIP,
-        count: row.recordRowCount
-      })
-
-      return {
-        ...row,
-        attachmentUrl,
-        createTime: currentTime,
-        updateTime: currentTime,
+    // 准备发送给云函数的数据
+    const payload = {
+      // 邮件基本信息
+      emailInfo: {
+        from: email.from?.address || 'unknown',
+        to: email.to?.map((addr: any) => addr.address) || [],
+        subject: email.subject || 'No subject',
+        date: email.date || new Date().toISOString(),
+        messageId: email.messageId || 'unknown'
+      },
+      
+      // 附件信息
+      attachment: {
+        filename: attachment.filename,
+        mimeType: attachment.mimeType,
+        content: attachment.content, // 原始内容，云函数会处理
+        size: typeof attachment.content === 'string' ? attachment.content.length : attachment.content.byteLength
+      },
+      
+      // 解析后的DMARC数据
+      dmarcRecords: reportRows,
+      
+      // 处理时间戳
+      processedAt: new Date().toISOString(),
+      
+      // Worker信息
+      workerInfo: {
+        version: '1.0.0',
+        source: 'cloudflare-workers'
       }
-    })
-    console.log('✅ All records converted successfully')
+    }
 
-    console.log('🚀 Attempting batch insert to CloudBase...')
-    const insertedIds = await uniCloudClient.batchInsertDmarcRecords(databaseRecords)
-    console.log('🎉 Batch insert successful!')
-    console.log('📊 Inserted record IDs:', insertedIds)
-    console.log('✅ Successfully inserted', insertedIds.length, 'records to CloudBase database')
+    console.log('📦 Payload summary:')
+    console.log('  - Email from:', payload.emailInfo.from)
+    console.log('  - Email subject:', payload.emailInfo.subject)
+    console.log('  - Attachment filename:', payload.attachment.filename)
+    console.log('  - DMARC records count:', payload.dmarcRecords.length)
+    console.log('  - Payload size:', JSON.stringify(payload).length, 'characters')
+
+    console.log('🚀 Sending request to UniCloud function...')
+    console.log('🌐 Function URL:', cloudFunctionUrl)
+
+    const response = await fetch(cloudFunctionUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Cloudflare-Workers-DMARC-Processor/1.0'
+      },
+      body: JSON.stringify(payload)
+    })
+
+    console.log('📡 Response status:', response.status, response.statusText)
+    console.log('📋 Response headers:', Object.fromEntries(response.headers.entries()))
+
+    if (response.ok) {
+      const result = await response.json()
+      console.log('✅ UniCloud function executed successfully!')
+      console.log('📄 Response data:', JSON.stringify(result, null, 2))
+      
+      // 记录处理结果
+      if (result.success) {
+        console.log('🎉 Data processing completed successfully!')
+        if (result.uploadedFileUrl) {
+          console.log('📁 File uploaded to:', result.uploadedFileUrl)
+        }
+        if (result.insertedRecords) {
+          console.log('💾 Database records inserted:', result.insertedRecords)
+        }
+        if (result.processingTime) {
+          console.log('⏱️ Processing time:', result.processingTime, 'ms')
+        }
+      } else {
+        console.warn('⚠️ Function executed but reported errors:', result.error || 'Unknown error')
+      }
+    } else {
+      const errorText = await response.text()
+      console.error('❌ UniCloud function call failed!')
+      console.error('📋 Error response:', errorText)
+      throw new Error(`UniCloud function failed: ${response.status} ${response.statusText} - ${errorText}`)
+    }
   } catch (error) {
-    console.error('❌ Batch insert failed:', error)
-    console.error('📋 Batch error details:', {
+    console.error('💥 Error calling UniCloud function:', error)
+    console.error('📋 Error details:', {
       message: error.message,
       stack: error.stack,
+      functionUrl: cloudFunctionUrl,
       recordCount: reportRows.length
     })
-
-    console.log('🔄 Attempting individual record inserts as fallback...')
-    let successCount = 0
-    let failureCount = 0
-    const currentTime = Date.now()
-
-    for (let i = 0; i < reportRows.length; i++) {
-      const row = reportRows[i]
-      console.log(`🔄 Inserting individual record ${i + 1}/${reportRows.length}...`)
-      console.log('📝 Record details:', {
-        reportId: row.reportMetadataReportId,
-        domain: row.policyPublishedDomain,
-        sourceIP: row.recordRowSourceIP
-      })
-
-      try {
-        const databaseRecord: DmarcDatabaseRecord = {
-          ...row,
-          attachmentUrl,
-          createTime: currentTime,
-          updateTime: currentTime,
-        }
-
-        const recordId = await uniCloudClient.insertDmarcRecord(databaseRecord)
-        successCount++
-        console.log(`✅ Record ${i + 1} inserted successfully with ID:`, recordId)
-      } catch (individualError) {
-        failureCount++
-        console.error(`❌ Failed to insert record ${i + 1}:`, individualError)
-        console.error('📋 Individual error details:', {
-          message: individualError.message,
-          recordIndex: i,
-          reportId: row.reportMetadataReportId
-        })
-      }
-    }
-
-    console.log('📊 Individual insert summary:')
-    console.log('  - Successful:', successCount)
-    console.log('  - Failed:', failureCount)
-    console.log('  - Total:', reportRows.length)
-
-    if (successCount === 0) {
-      console.error('💥 All individual inserts failed!')
-      throw new Error('Failed to insert any records to database')
-    } else if (failureCount > 0) {
-      console.warn('⚠️ Some records failed to insert, but', successCount, 'were successful')
-    } else {
-      console.log('🎉 All individual inserts successful!')
-    }
+    throw error
   }
 }
